@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Viby can scroll, drag and wait on an X11 desktop.** With `xdotool`, a desktop on X11 took clicks, typing and keys, but a scroll, a drag, a wait between two steps, or a screenshot or window list asked for as a step failed with "Desktop computer control is not available on this display session." They now work there as they do on Hyprland: the wheel and drags through `xdotool`.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
