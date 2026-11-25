@@ -1,8 +1,9 @@
 import { ImagePlus, X } from "lucide-react";
 import { type ChangeEvent, type ClipboardEvent, useMemo, useRef, useState } from "react";
+import type { Agent, Engine, Workspace } from "../../../shared/api.js";
 import { call, useAgents, useEngines, useWorkspaces } from "../../api.js";
 import { Composer } from "../../components/Session.js";
-import { useT } from "../../i18n/index.js";
+import { useT, type Key, type Translator } from "../../i18n/index.js";
 import { Rich } from "../../i18n/Rich.js";
 
 const MAX_IMAGES = 4;
@@ -29,18 +30,86 @@ interface Suggestion {
   immediate?: boolean;
 }
 
-const SLASH_COMMANDS: ReadonlyArray<{ cmd: string; insert: string; hint: string; immediate?: boolean; needsWaiting?: boolean }> = [
-  { cmd: "/go", insert: "/go", hint: "Run waiting plan", immediate: true, needsWaiting: true },
-  { cmd: "/cancel", insert: "/cancel", hint: "Cancel waiting plan", immediate: true, needsWaiting: true },
-  { cmd: "/new", insert: "/new", hint: "Start new conversation", immediate: true },
-  { cmd: "/undo", insert: "/undo", hint: "Restore last delete", immediate: true },
-  { cmd: "/review", insert: "/review", hint: "Mark all runs reviewed", immediate: true },
-  { cmd: "/remember", insert: "/remember ", hint: "Save note to viby.md" },
-  { cmd: "/stop-all", insert: "/stop-all", hint: "Stop Viby's running CLIs", immediate: true },
-  { cmd: "/diagnostics", insert: "/diagnostics", hint: "Show Viby diagnostics & issues", immediate: true },
-  { cmd: "/trust", insert: "/trust", hint: "Approve folder-trust prompt", immediate: true },
-  { cmd: "/open", insert: "/open ", hint: "Jump to view or workspace" },
+const SLASH_COMMANDS: ReadonlyArray<{ cmd: string; insert: string; hint: Key; immediate?: boolean; needsWaiting?: boolean }> = [
+  { cmd: "/go", insert: "/go", hint: "orch.slash.go", immediate: true, needsWaiting: true },
+  { cmd: "/cancel", insert: "/cancel", hint: "orch.slash.cancel", immediate: true, needsWaiting: true },
+  { cmd: "/new", insert: "/new", hint: "orch.slash.new", immediate: true },
+  { cmd: "/undo", insert: "/undo", hint: "orch.slash.undo", immediate: true },
+  { cmd: "/review", insert: "/review", hint: "orch.slash.review", immediate: true },
+  { cmd: "/remember", insert: "/remember ", hint: "orch.slash.remember" },
+  { cmd: "/stop-all", insert: "/stop-all", hint: "orch.slash.stopAll", immediate: true },
+  { cmd: "/diagnostics", insert: "/diagnostics", hint: "orch.slash.diagnostics", immediate: true },
+  { cmd: "/trust", insert: "/trust", hint: "orch.slash.trust", immediate: true },
+  { cmd: "/open", insert: "/open ", hint: "orch.slash.open" },
 ];
+
+/**
+ * What the box offers for the text before the cursor: the `/` commands, or the names an `@` starts
+ * (workspaces, agents, CLIs found here), each said in the window's language. Nothing for anything else.
+ */
+export function composerSuggestions(
+  before: string,
+  known: { waiting: boolean; workspaces: ReadonlyArray<Pick<Workspace, "id" | "name">>; agents: ReadonlyArray<Pick<Agent, "id" | "name">>; engines: ReadonlyArray<Pick<Engine, "id" | "label" | "available">> },
+  t: Translator,
+): Suggestion[] {
+  if (before.startsWith("/") && !before.includes(" ") && !before.includes("\n")) {
+    const needle = before.toLowerCase();
+    return SLASH_COMMANDS.filter((item) => (!item.needsWaiting || known.waiting) && item.cmd.startsWith(needle)).map((item) => ({
+      key: item.cmd,
+      label: item.cmd,
+      detail: t(item.hint),
+      insert: item.insert,
+      replaceStart: 0,
+      immediate: item.immediate,
+    }));
+  }
+  const atMatch = /(?:^|\s)@([a-z0-9._-]*)$/i.exec(before);
+  if (atMatch) {
+    const prefix = atMatch[1].toLowerCase();
+    const replaceStart = before.length - atMatch[1].length - 1;
+    const entries: Suggestion[] = [
+      ...known.workspaces.map((w) => ({
+        key: `ws:${w.id}`,
+        label: `@${w.name}`,
+        detail: t("switcher.workspace"),
+        insert: `@${w.name} `,
+        replaceStart,
+      })),
+      ...known.agents.map((a) => ({
+        key: `ag:${a.id}`,
+        label: `@${a.name}`,
+        detail: t("switcher.agent"),
+        insert: `@${a.name} `,
+        replaceStart,
+      })),
+      ...known.engines
+        .filter((e) => e.available)
+        .map((e) => ({
+          key: `eng:${e.id}`,
+          label: `@${e.label}`,
+          detail: t("orch.engine"),
+          insert: `@${e.label} `,
+          replaceStart,
+        })),
+    ];
+    const cleanPrefix = prefix.replace(/[-_.]+/g, "");
+    return entries
+      .filter((entry) => {
+        const low = entry.label.slice(1).toLowerCase();
+        if (!cleanPrefix || low.includes(prefix)) return true;
+        // Also match initials/subsequence on `@vbf` -> `@VibeForge` or `@sl` -> `@Star Ledger`
+        let pos = 0;
+        for (const ch of cleanPrefix) {
+          const at = low.indexOf(ch, pos);
+          if (at < 0) return false;
+          pos = at + 1;
+        }
+        return true;
+      })
+      .slice(0, 7);
+  }
+  return [];
+}
 
 function setTextareaValue(node: HTMLTextAreaElement, nextValue: string): void {
   const proto = typeof HTMLTextAreaElement !== "undefined" ? HTMLTextAreaElement.prototype : undefined;
@@ -140,67 +209,10 @@ export function VibyComposer({
     if (files.length) void addImageFiles(files);
   };
 
-  const suggestions = useMemo<Suggestion[]>(() => {
-    if (menuHidden) return [];
-    const before = textState.value.slice(0, textState.cursor);
-    if (before.startsWith("/") && !before.includes(" ") && !before.includes("\n")) {
-      const needle = before.toLowerCase();
-      return SLASH_COMMANDS.filter((item) => (!item.needsWaiting || Boolean(waitingTurnId)) && item.cmd.startsWith(needle)).map((item) => ({
-        key: item.cmd,
-        label: item.cmd,
-        detail: item.hint,
-        insert: item.insert,
-        replaceStart: 0,
-        immediate: item.immediate,
-      }));
-    }
-    const atMatch = /(?:^|\s)@([a-z0-9._-]*)$/i.exec(before);
-    if (atMatch) {
-      const prefix = atMatch[1].toLowerCase();
-      const replaceStart = before.length - atMatch[1].length - 1;
-      const entries: Suggestion[] = [
-        ...workspaces.map((w) => ({
-          key: `ws:${w.id}`,
-          label: `@${w.name}`,
-          detail: "Workspace",
-          insert: `@${w.name} `,
-          replaceStart,
-        })),
-        ...agents.map((a) => ({
-          key: `ag:${a.id}`,
-          label: `@${a.name}`,
-          detail: "Agent",
-          insert: `@${a.name} `,
-          replaceStart,
-        })),
-        ...engines
-          .filter((e) => e.available)
-          .map((e) => ({
-            key: `eng:${e.id}`,
-            label: `@${e.label}`,
-            detail: "CLI",
-            insert: `@${e.label} `,
-            replaceStart,
-          })),
-      ];
-      const cleanPrefix = prefix.replace(/[-_.]+/g, "");
-      return entries
-        .filter((entry) => {
-          const low = entry.label.slice(1).toLowerCase();
-          if (!cleanPrefix || low.includes(prefix)) return true;
-          // Also match initials/subsequence on `@vbf` -> `@VibeForge` or `@sl` -> `@Star Ledger`
-          let pos = 0;
-          for (const ch of cleanPrefix) {
-            const at = low.indexOf(ch, pos);
-            if (at < 0) return false;
-            pos = at + 1;
-          }
-          return true;
-        })
-        .slice(0, 7);
-    }
-    return [];
-  }, [textState, menuHidden, waitingTurnId, workspaces, agents, engines]);
+  const suggestions = useMemo<Suggestion[]>(
+    () => (menuHidden ? [] : composerSuggestions(textState.value.slice(0, textState.cursor), { waiting: Boolean(waitingTurnId), workspaces, agents, engines }, t)),
+    [textState, menuHidden, waitingTurnId, workspaces, agents, engines, t],
+  );
 
   const applySuggestion = (item: Suggestion) => {
     const textarea = wrapRef.current?.querySelector("textarea");

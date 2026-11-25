@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Viby's `/` commands and `@` names speak your language.** The list that opens when you type `/` or `@` in Viby's message box described every command, and labelled each name Workspace, Agent or CLI, in English whatever the window's language. It now uses all seven.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
