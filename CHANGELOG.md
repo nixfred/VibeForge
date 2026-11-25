@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Viby reads what you asked about when it mentions diagnostics.** Since 3.9.0, anything Viby looked into with the word "diagnostics" in it, such as a skill called "Read TypeScript diagnostics", a run, or the type-check diagnostics a CLI printed, came back as Viby's own `/diagnostics` instead. Only asking for diagnostics as that ("diagnostics", "viby diagnostics") does now, as before 3.9.0.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
